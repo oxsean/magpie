@@ -12275,7 +12275,9 @@ function renderSigning(sub) {
     tt.append(el("span", "n", t("{name} accounts can be suspended", { name: sub.name })));
     if (sub.hint) tt.append(el("span", "s", t(sub.hint)));
     tt.append(el("span", "s", t(sub.riskNote || "Google may suspend an Antigravity account it sees used outside Antigravity. Use one you can afford to lose.")));
-    box.append(tt);
+    const acts = el("span", "risk-acts");
+    box.classList.add("risk");
+    box.append(tt, acts);
     const go = el("button", "text primary", t("Sign in anyway"));
     const o = { user: signing.forUser, proxy: signing.picked };
     go.onclick = () => startSignIn(sub.agent, true, undefined, o);
@@ -12285,8 +12287,8 @@ function renderSigning(sub) {
       const imp = el("button", "text", importSay(sub.agent).instead || t("Import instead…"));
       imp.title = importSay(sub.agent).from;
       imp.onclick = () => startImport(sub.agent);
-      box.append(close, imp, go);
-    } else box.append(close, go);
+      acts.append(close, imp, go);
+    } else acts.append(close, go);
     return box;
   }
   if (signing.state === "site") {
