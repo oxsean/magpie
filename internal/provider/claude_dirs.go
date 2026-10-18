@@ -167,6 +167,9 @@ func syncSavedClaude(user string) {
 // Claude Code's /usage run in the account's own config directory, through
 // the account's own proxy. Claude Code's own sign-in isn't touched.
 func readSavedClaudeUsage(ctx context.Context, user string) ([]QuotaWindow, error) {
+	if claudeTokenLogin(user) {
+		return readTokenClaudeUsage(ctx, user)
+	}
 	ws := []QuotaWindow{}
 	err := inSavedClaudeDir(user, func(dir string) error {
 		var err error
@@ -196,6 +199,13 @@ func claudeSavedDir(user string) (string, error) {
 		return "", fmt.Errorf("no saved claude account %q", user)
 	}
 	dir := claudeAccountDir(user)
+	if claudeSetupToken(ls[i]) != "" {
+		// the token goes in the run's env (ClaudeDirToken), never here
+		if why := claudeSignedOut(ls[i]); why != "" {
+			return "", errors.New(why)
+		}
+		return dir, os.MkdirAll(dir, 0o700)
+	}
 	has, changed, err := syncClaudeDir(&ls[i])
 	if err != nil {
 		return "", err
@@ -240,6 +250,9 @@ func claudeSavedDir(user string) (string, error) {
 // l has. has says the directory holds a sign-in to run on; changed, that l
 // changed.
 func syncClaudeDir(l *savedLogin) (has, changed bool, err error) {
+	if claudeSetupToken(*l) != "" {
+		return false, false, nil
+	}
 	c, ok := readClaudeDir(claudeAccountDir(l.User))
 	switch {
 	case ok:
@@ -349,7 +362,7 @@ func claudeSignedOut(l savedLogin) string {
 		}
 		return l.Lapsed
 	}
-	if _, ok := parseClaudeCredentials(l.Auth); ok {
+	if _, ok := parseClaudeCredentials(l.Auth); ok || claudeSetupToken(l) != "" {
 		return ""
 	}
 	return claudeGoneLapse

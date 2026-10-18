@@ -31,7 +31,7 @@ func ClaudeSignInRequired(message string) bool {
 		"OAuth session expired and could not be refreshed", // Claude Code: its refresh refused
 		"OAuth token revoked",                              // Claude Code: Anthropic revoked it
 		"OAuth access token has been revoked",              // Anthropic's own 401
-		claudeAuthLapse, claudeLogoutLapse, claudeGoneLapse,
+		claudeAuthLapse, claudeLogoutLapse, claudeGoneLapse, claudeTokenLapse,
 	} {
 		if strings.Contains(message, text) {
 			return true
@@ -56,6 +56,9 @@ func (c claudeCredentials) cleared() bool {
 }
 
 func claudeLoginVersion(l savedLogin) string {
+	if tok := claudeSetupToken(l); tok != "" {
+		return claudeTokenVersion(tok)
+	}
 	if c, ok := parseClaudeCredentials(l.Auth); ok {
 		return c.version()
 	}
@@ -85,12 +88,22 @@ func refuseClaudeLogin(l *savedLogin, version string) bool {
 	return true
 }
 
+// refuseClaudeToken keeps on the setup-token account l that Anthropic
+// refused its token, and says whether that changed l.
+func refuseClaudeToken(l *savedLogin, version string) bool {
+	if l.Refused == version && l.Lapsed == claudeTokenLapse {
+		return false
+	}
+	l.Lapsed, l.Refused = claudeTokenLapse, version
+	return true
+}
+
 // NoteClaudeSignInFailure keeps a run's refusal on the saved Claude account
 // user, when the run started on the credential the account still has
 // (version): one started on an older credential says nothing of this one.
 // The run's own error stays in the request's trace.
 func NoteClaudeSignInFailure(user, version, message string) {
-	if !ClaudeSignInRequired(message) {
+	if !ClaudeSignInRequired(message) && !ClaudeTokenRefused(message) {
 		return
 	}
 	loginsMu.Lock()
@@ -98,7 +111,11 @@ func NoteClaudeSignInFailure(user, version, message string) {
 	ls := readLogins()
 	for i := range ls {
 		if ls[i].Agent == "claude" && strings.EqualFold(ls[i].User, user) && claudeLoginVersion(ls[i]) == version {
-			if refuseClaudeLogin(&ls[i], version) {
+			token := claudeSetupToken(ls[i]) != ""
+			if !token && !ClaudeSignInRequired(message) {
+				return
+			}
+			if token && refuseClaudeToken(&ls[i], version) || !token && refuseClaudeLogin(&ls[i], version) {
 				_ = writeLogins(ls)
 			}
 			return

@@ -56,6 +56,9 @@ type Login struct {
 	// Returns is the account magpie signed the agent out of when it was
 	// spent, and signs it back in to once it has room again (#408).
 	Returns bool `json:"returns,omitempty"`
+	// Token is a Claude account added by its setup-token (claude_token.go):
+	// it runs beside Claude Code's own sign-in and is never switched in.
+	Token bool `json:"token,omitempty"`
 
 	// first is the saved Claude account served in the place of Claude
 	// Code's own while it is signed out (claudeStandIn).
@@ -877,7 +880,7 @@ func Logins(agent string) []Login {
 		using := strings.EqualFold(active[l.Agent], l.User)
 		first := l.Agent == "claude" && strings.EqualFold(standIn, l.User)
 		lg := Login{Agent: l.Agent, User: l.User, Plan: l.Plan, Seen: l.Seen, Active: using, On: using || first || l.On,
-			Paused: (using || first) && pausedOwn(ls, l.Agent, l.User), first: first}
+			Paused: (using || first) && pausedOwn(ls, l.Agent, l.User), first: first, Token: claudeSetupToken(l) != ""}
 		if l.Agent == "claude" {
 			lg.Lapsed = claudeSignedOut(l)
 		} else {
@@ -1074,6 +1077,9 @@ func switchSavedLogin(agent, user string) (from string, _ error) {
 	}
 	if target == nil {
 		return "", fmt.Errorf("no saved %s account %q", agent, user)
+	}
+	if claudeSetupToken(*target) != "" {
+		return "", fmt.Errorf("%s: %s", target.User, errClaudeTokenSwitch)
 	}
 	if agent == "claude" {
 		// as Claude Code keeps it, if it has run on the account beside the

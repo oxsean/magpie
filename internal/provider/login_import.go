@@ -44,6 +44,9 @@ type loginImport struct {
 	// uuids, Claude Code's oauthAccount accountUuid and organizationUuid,
 	// when the file has them
 	claudeAccount, claudeOrg string
+	// setupToken is a Claude setup-token on a line of its own, and name
+	// the name written before it on that line (claude_token.go)
+	setupToken, name string
 }
 
 // claudeImportScopes are what Claude Code's sign-in asks for, taken when a
@@ -96,6 +99,10 @@ func parseLoginImport(agent, data string) ([]loginImport, error) {
 		for _, line := range strings.Split(s, "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if e, ok := claudeTokenImport(line); ok && agent == "claude" {
+				out = append(out, e)
 				continue
 			}
 			if strings.ContainsAny(line, " \t") {
@@ -311,6 +318,21 @@ func ImportLogins(ctx context.Context, agent string, files []string) ([]Imported
 		switch {
 		case e.err != "":
 			out[i] = ImportedAccount{User: name, File: e.file, Status: "failed", Error: e.err}
+			continue
+		case e.setupToken != "" && seen[e.setupToken]:
+			out[i] = ImportedAccount{User: cmp.Or(e.name, claudeTokenName(e.setupToken)), Status: "failed", Error: "in the files twice"}
+			continue
+		case e.setupToken != "":
+			seen[e.setupToken] = true
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				c, cancel := context.WithTimeout(ctx, 45*time.Second)
+				defer cancel()
+				out[i] = importClaudeToken(c, e, kept)
+			}()
 			continue
 		case e.refreshToken == "":
 			out[i] = ImportedAccount{User: name, Status: "failed", Error: "no refresh_token in it"}

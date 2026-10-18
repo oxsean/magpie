@@ -45,25 +45,7 @@ const claudeHeard = time.Hour
 // answered, in place of the windows of the same names last read, and has
 // routing weigh the account by it.
 func NoteClaudeLimits(user string, ls []ClaudeLimit) {
-	var heard []QuotaWindow
-	for _, l := range ls {
-		i := slices.IndexFunc(claudeKinds, func(k struct {
-			kind, name, model string
-			span              time.Duration
-		}) bool {
-			return k.kind == l.Kind
-		})
-		if i < 0 {
-			continue
-		}
-		k := claudeKinds[i]
-		w := QuotaWindow{Name: k.name, Used: l.Used * 100, Span: k.span, Model: k.model}
-		if l.ResetsAt > 0 {
-			t := time.Unix(l.ResetsAt, 0)
-			w.ResetsAt = &t
-		}
-		heard = append(heard, w)
-	}
+	heard := claudeLimitWindows(ls)
 	if len(heard) == 0 {
 		return
 	}
@@ -96,6 +78,30 @@ func NoteClaudeLimits(user string, ls []ClaudeLimit) {
 	c.m[key] = e
 	c.Unlock()
 	StaleAllowance("claude", user)
+}
+
+// claudeLimitWindows are the windows ls tells, of the kinds magpie knows.
+func claudeLimitWindows(ls []ClaudeLimit) []QuotaWindow {
+	var heard []QuotaWindow
+	for _, l := range ls {
+		i := slices.IndexFunc(claudeKinds, func(k struct {
+			kind, name, model string
+			span              time.Duration
+		}) bool {
+			return k.kind == l.Kind
+		})
+		if i < 0 {
+			continue
+		}
+		k := claudeKinds[i]
+		w := QuotaWindow{Name: k.name, Used: l.Used * 100, Span: k.span, Model: k.model}
+		if l.ResetsAt > 0 {
+			t := time.Unix(l.ResetsAt, 0)
+			w.ResetsAt = &t
+		}
+		heard = append(heard, w)
+	}
+	return heard
 }
 
 // KeptClaudeLimits is what is kept of user's allowance as of now, in the
