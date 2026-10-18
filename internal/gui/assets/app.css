@@ -2670,6 +2670,10 @@ body.window .ag-sk-icon { width: 22px; height: 22px; border-radius: 6px; }
 .signing .n { font-weight: 500; }
 .signing .s { color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
 .signing > .text { margin: -3px 0; }
+/* a risk warning keeps 320px to be read; where its actions don't fit beside that, they go on a line under it, at its right */
+.signing.risk { flex-wrap: wrap; row-gap: 8px; }
+.signing.risk .tt { flex: 1 1 320px; }
+.signing.risk .risk-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; margin-left: auto; }
 .signing .acts { display: flex; flex-wrap: wrap; gap: 2px; margin: 2px 0 0 -4px; min-width: 0; }
 .signing .acts .link { color: var(--fg-2); }
 /* the proxy the sign-in goes through (#1663): a long address ends in an
