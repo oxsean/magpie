@@ -1585,11 +1585,15 @@ by running Claude Code's `/usage`:
 - otherwise again after 5 to 15 minutes (drawn at random each time), and
   only if Claude Code was used since.
 
-A saved Claude account that isn't signed in is never read. What it has
-left is known only from what Claude Code says as that account answers a
-request through the gateway, and its Usage card says so until then. So
-the windows routing goes by for such an account can be hours old; a window
-whose reset has passed counts as empty again.
+A saved Claude account that Claude Code isn't signed in to is read only
+when you refresh its own card: magpie runs `/usage` in that account's own
+config directory. Otherwise what it has left is known only from what
+Claude Code says as that account answers a request through the gateway,
+and its Usage card says so until then. So the windows routing goes by for
+such an account can be hours old; a window whose reset has passed counts
+as empty again. An account added by its setup-token (below) has no
+`/usage`: refreshing its card has Claude Code answer one word at Haiku on
+it, and reads the allowance Claude Code tells with the answer.
 
 ### Signed-in agents as providers
 
@@ -1652,6 +1656,21 @@ magpie has already is left as it is, two Team seats of one email stay two
 accounts, and an entry with only an access token (a ChatGPT web session)
 is refused, since it would stop working within days with nothing to renew
 it.
+
+A Claude account can also be added by the long-lived token
+`claude setup-token` prints (`sk-ant-oat01-…`), for a computer with no
+browser: `magpie accounts add claude --token [--name <name>]` (the token
+typed unseen, or piped in with `--yes`), *Add by setup-token…* under
+Claude's accounts, which asks a name and the token, or the token pasted in the import box, one a
+line, each after a name if you like. magpie tries the
+token with one word at Haiku through Claude Code before it keeps it. Such
+a token can't read the account's email, so the account goes by the name
+you give it (`setup-token` and a few hex digits without one). Claude Code
+runs on it in a config directory of its own with the token as
+`CLAUDE_CODE_OAUTH_TOKEN`, beside Claude Code's own sign-in: it is never
+switched in to Claude Code, which would need a refresh token. Nothing
+renews it; once Anthropic refuses it, the account says to run
+`claude setup-token` again and add the new one.
 
 ### Connecting anything else
 

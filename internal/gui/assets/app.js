@@ -11778,13 +11778,13 @@ function importSay(agent) {
     };
   }
   if (agent === "claude") {
-    // nothing is asked of Anthropic: the sign-in is kept as the file has it
+    // a file's sign-in is kept as it is; a token is tried (claude_token.go)
     return {
       from: t("Bring in accounts from CLIProxyAPI's auth files or {own}", { own: "Claude Code's .credentials.json" }),
-      intro: t("Choose or paste CLIProxyAPI's auth files (JSON) or {own}. Each account is kept as the file has it.", { own: "Claude Code's .credentials.json" }),
+      intro: t("Choose or paste CLIProxyAPI's auth files (JSON) or {own}, or tokens from claude setup-token, one a line.", { own: "Claude Code's .credentials.json" }),
       spent: t("Claude Code renews the sign-in the first time it uses it, and the file's copy then stops working: the tool it came from has to sign in again."),
       checking: t("Adding the accounts…"),
-      checks: t("Each account is kept as the file has it; nothing is asked of Claude."),
+      checks: t("A file's account is kept as it is; a token is tried first."),
     };
   }
   return {
@@ -12696,7 +12696,7 @@ function renderAccounts(a, p) {
       row.append(el("span", "using", t("Sign-in required")));
       const again = el("button", "text", t("Sign in again"));
       again.onclick = () => startSignIn(a.agent, false, undefined, { user: l.user });
-      row.append(again);
+      if (!l.token) row.append(again);
       // the one Claude Code is signed in to can't be forgotten (ForgetLogin)
       if (!l.active) {
         const forget = el("button", "text quiet", t("Remove"));
@@ -12751,7 +12751,8 @@ function renderAccounts(a, p) {
         again.title = t("magpie signs {agent} back in to this account once it has room again", { agent: a.agentName });
         row.append(again);
       }
-      if (kept) {
+      if (l.token) row.append(forget);
+      else if (kept) {
         // the sign-in stays where it is kept: Make first is the order's,
         // and an account not in use is ticked on by its dot
         row.append(forget);
@@ -12780,7 +12781,7 @@ function renderAccounts(a, p) {
     // the app's own menu, as every other pick in it, not a native select
     let keepAs = kept;
     const opts = [{ v: "", name: t("the first account"), note: "", literalName: true }];
-    for (const l of ls) if (!l.lapsed) opts.push({ v: l.user, name: l.user, note: "", literalName: true });
+    for (const l of ls) if (!l.lapsed && !l.token) opts.push({ v: l.user, name: l.user, note: "", literalName: true });
     const as = el("button", "sess-pick keep-as" + (keepAs ? " set" : ""));
     as.type = "button";
     as.title = t("The account {agent} stays signed in to; the first is the one the gateway uses first", { agent: a.agentName });
@@ -12836,6 +12837,12 @@ function renderAccounts(a, p) {
     add.append(ic, el("span", "n", t(sub.single ? "Sign in to another {name} account" : "Add another {name} account", { name: sub.name })));
     add.onclick = () => startSignIn(a.agent);
     list.append(add);
+    if (a.agent === "claude") {
+      const b = el("button", "acc add", el("span", "dot", svg(PLUS, 10, 1.8)));
+      b.append(el("span", "n", t("Add by setup-token…")));
+      b.onclick = () => startImport("claude", 1);
+      list.append(b);
+    }
     if (sub.importable) {
       const imp = el("button", "acc add");
       const ic2 = el("span", "dot");
@@ -12891,12 +12898,13 @@ function renderCodexApp(user) {
 // again: the files' text (or what is pasted) goes to magpie, which checks
 // each account with the vendor before keeping it, and says what became of
 // each. What is read stays here only until it is sent; the box masks it.
-function startImport(agent) {
+function startImport(agent, token) {
   if (signingOpen()) api("signin/" + signing.id + "/cancel", {}).catch(() => {});
-  signing = { agent, state: "import", text: "", files: [] };
+  signing = { agent, state: "import", text: "", files: [], token };
   renderProviders();
-  document.querySelector(".signing.import textarea")?.focus();
+  document.querySelector(".signing.import :is(textarea, input)")?.focus();
 }
+
 
 async function runImport(agent) {
   const files = signing.files.map((f) => f.text);
@@ -12904,6 +12912,7 @@ async function runImport(agent) {
   const names = signing.files.map((f) => f.name);
   if (signing.text.trim()) { files.push(signing.text); names.push(t("The pasted text")); }
   if (!files.length) return;
+  const token = signing.token;
   signing = { agent, state: "importing", names };
   renderProviders();
   try {
@@ -12926,7 +12935,7 @@ async function runImport(agent) {
     renderAgents();
   } catch (e) {
     if (signing?.agent !== agent) return;
-    signing = { agent, state: "import", text: "", files: [], error: e.message };
+    signing = { agent, state: "import", text: "", files: [], token, error: e.message };
     renderProviders();
   }
 }
@@ -12967,6 +12976,7 @@ function renderLoginImport(sub) {
     return box;
   }
   box.append(el("span", "mark", "↑"));
+  if (signing.token) return tokenForm(box, tt, sub);
   const say = importSay(sub.agent);
   tt.append(el("span", "n", say.title || t("Import {name} accounts", { name: sub.name })), el("span", "s", say.intro));
   if (say.spent) tt.append(el("span", "s", say.spent));
@@ -13008,6 +13018,33 @@ function renderLoginImport(sub) {
   const close = el("button", "text", t("Cancel"));
   close.onclick = cancelSignIn;
   box.append(close, go);
+  return box;
+}
+
+// A Claude account by the token `claude setup-token` prints (#2392): its
+// name and token in fields of their own, imported as a line "name token".
+function tokenForm(box, tt, sub) {
+  tt.append(el("span", "n", t("Add a Claude account by its setup-token")),
+    el("span", "s", t("Run {cmd} where Claude Code is signed in, and paste the token it prints. magpie tries it once through Claude Code before adding it.", { cmd: "claude setup-token" })),
+    el("span", "s", t(sub.riskNote)));
+  const name = el("input"), tok = el("input");
+  name.placeholder = t("Name (optional)");
+  tok.type = "password";
+  tok.placeholder = "sk-ant-oat01-…";
+  const go = el("button", "text primary", t("Add"));
+  const ready = () => {
+    signing.text = name.value.trim() + " " + tok.value.trim();
+    go.disabled = !/^sk-ant-oat01-\S+$/.test(tok.value.trim());
+  };
+  name.oninput = tok.oninput = ready;
+  name.maxLength = 80;
+  tt.append(name, tok);
+  if (signing.error) tt.append(el("span", "s why", signing.error));
+  go.onclick = () => runImport("claude");
+  ready();
+  const close = el("button", "text", t("Cancel"));
+  close.onclick = cancelSignIn;
+  box.append(tt, close, go);
   return box;
 }
 

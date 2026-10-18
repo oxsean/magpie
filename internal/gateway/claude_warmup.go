@@ -77,6 +77,69 @@ func askClaude(ctx context.Context, configDir, model string) error {
 func init() {
 	provider.ProbeClaudeVia(askClaude)
 	provider.UsageClaudeVia(claudeUsage)
+	provider.LimitsClaudeVia(claudeAskLimits)
+}
+
+// claudeAskLimits has Claude Code answer one "hi" at Haiku, as warmClaude
+// does, in configDir on token ("" for the saved account's own), and gives
+// the allowance its rate_limit_event told: a setup-token's /usage tells
+// none.
+func claudeAskLimits(ctx context.Context, configDir, token string) ([]provider.ClaudeLimit, error) {
+	binary, err := claudeBinary()
+	if err != nil {
+		return nil, err
+	}
+	tmp, err := os.MkdirTemp("", "magpie-claude-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	cmd := binary.command(ctx, claudeLimitsArgs()...)
+	cmd.Dir = tmp
+	cmd.Stdin = strings.NewReader("hi")
+	env, err := binary.proxied(ctx, cleanClaudeEnv(os.Environ()))
+	if err != nil {
+		return nil, err
+	}
+	cmd.Env = binary.envOn(env, configDir, token)
+	var out, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	runErr := runClaudeTree(cmd)
+	limits, res, ok := claudeStreamLimits(out.Bytes())
+	switch {
+	case ok && res.IsError:
+		return limits, errors.New("Claude Code: " + clip(res.Result))
+	case len(limits) > 0:
+		return limits, nil
+	case runErr != nil:
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			return nil, runErr
+		}
+		return nil, errors.New("Claude Code: " + clip(msg))
+	}
+	return nil, errors.New("Claude Code told no allowance")
+}
+
+// claudeStreamLimits reads what claude -p --output-format stream-json
+// printed: the windows its rate_limit_events told, and its result.
+func claudeStreamLimits(b []byte) (limits []provider.ClaudeLimit, res claudeRun, ok bool) {
+	for line := range bytes.SplitSeq(b, []byte("\n")) {
+		var e struct {
+			Type          string          `json:"type"`
+			RateLimitInfo json.RawMessage `json:"rate_limit_info"`
+		}
+		if json.Unmarshal(line, &e) != nil {
+			continue
+		}
+		switch e.Type {
+		case "rate_limit_event":
+			limits = append(limits, claudeLimits(e.RateLimitInfo)...)
+		case "result":
+			ok = json.Unmarshal(line, &res) == nil
+		}
+	}
+	return limits, res, ok
 }
 
 // claudeUsage is what Claude Code's /usage prints for the account in
@@ -175,6 +238,11 @@ func claudeResult(b []byte) (claudeRun, bool) {
 
 func claudeUsageArgs() []string {
 	return []string{"-p", "/usage", "--output-format", "json",
+		"--tools", "", "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence"}
+}
+
+func claudeLimitsArgs() []string {
+	return []string{"-p", "--output-format", "stream-json", "--verbose", "--model", "haiku",
 		"--tools", "", "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence"}
 }
 

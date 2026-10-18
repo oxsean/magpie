@@ -53,6 +53,19 @@ to use an http:// proxy. The `settings.json` env that magpie writes for the
 user's own Claude Code sessions leaves a SOCKS proxy out (see
 [Providers and accounts](providers-accounts.md)).
 
+A run on a saved account (a turn, warm-up, model test or `/usage`) goes
+through `claudeCLI.env`, which sets `CLAUDE_CONFIG_DIR` to the account's
+directory (`inClaudeDir`). For an account added by its setup-token
+(#2392) it also sets `CLAUDE_CODE_OAUTH_TOKEN` to that token
+(`provider.ClaudeDirToken`), which Claude Code takes over any sign-in;
+`cleanClaudeEnv` has already dropped the user's own. In WSL the variable
+is handed in only when it is set. `claudeAskLimits` asks such an account's
+allowance (see [Providers and accounts](providers-accounts.md)), with the
+token given outright (`envOn`) for one not saved yet. A turn that ends in
+Claude Code's "OAuth access token is invalid" is kept on a setup-token
+account as `NoteClaudeSignInFailure` keeps a refused sign-in
+(`provider.ClaudeTokenRefused`).
+
 The helper offers each of the client's tools under `bridgeToolName`
 (`bridgeTools`), which Claude Code calls `mcp__magpie__<name>`. Claude Code
 keeps only `[A-Za-z0-9_-]` of an MCP tool's name, so a name it would change

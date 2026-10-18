@@ -217,6 +217,7 @@ func TestClaudeRunEndsWhatItStarted(t *testing.T) {
 	}{
 		{"test", func(ctx context.Context) error { return askClaude(ctx, "", "haiku") }},
 		{"usage", func(ctx context.Context) error { _, err := claudeUsage(ctx, ""); return err }},
+		{"limits", func(ctx context.Context) error { _, err := claudeAskLimits(ctx, "", ""); return err }},
 	} {
 		t.Run(run.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -266,5 +267,77 @@ func TestClaudeRunEndsWhatItStarted(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// fakeStreamClaude is a claude that logs its args, config directory and
+// CLAUDE_CODE_OAUTH_TOKEN, and prints out, stream-json lines.
+func fakeStreamClaude(t *testing.T, out string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("a shell script stands in for Claude Code")
+	}
+	dir := t.TempDir()
+	log, body := filepath.Join(dir, "log"), filepath.Join(dir, "out")
+	os.WriteFile(body, []byte(out), 0o644)
+	script := "#!/bin/sh\n" +
+		"{ printf 'args:'; for a in \"$@\"; do printf '[%s]' \"$a\"; done; echo; " +
+		"echo \"dir:$CLAUDE_CONFIG_DIR\"; echo \"token:$CLAUDE_CODE_OAUTH_TOKEN\"; } > " + log + "\n" +
+		"cat " + body + "\n"
+	testenv.Program(t, filepath.Join(dir, "claude"), script)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return log
+}
+
+// What Claude Code 2.1.301 printed run on a setup-token (#2392): its
+// rate_limit_event tells the windows /usage doesn't.
+const setupTokenStream = `{"type":"system","subtype":"init","apiKeySource":"none","model":"claude-haiku-5-5"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1792318800,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.22,"resetsAt":1792318800},"seven_day":{"utilization":0.09,"resetsAt":1792814400}}},"uuid":"c40b2ea4-cc3b-4b7f-ab0b-38fdc896371a","session_id":"2e83c7f3-b1c7-4f26-8795-0d3ccfdbde9d"}
+{"type":"result","subtype":"success","is_error":false,"result":"OK"}
+`
+
+// A setup-token's allowance is asked of Claude Code at Haiku, the token in
+// the run's env alone, the user's own CLAUDE_CODE_OAUTH_TOKEN not.
+func TestClaudeAskLimitsOnSetupToken(t *testing.T) {
+	log := fakeStreamClaude(t, setupTokenStream)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "leaked")
+	ls, err := claudeAskLimits(context.Background(), "/a/token/dir", "sk-ant-oat01-T")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]provider.ClaudeLimit{
+		"five_hour": {Kind: "five_hour", Used: 0.22, ResetsAt: 1792318800},
+		"seven_day": {Kind: "seven_day", Used: 0.09, ResetsAt: 1792814400},
+	}
+	if len(ls) != 2 || ls[0] != want[ls[0].Kind] || ls[1] != want[ls[1].Kind] || ls[0].Kind == ls[1].Kind {
+		t.Fatalf("limits %+v", ls)
+	}
+	b, _ := os.ReadFile(log)
+	for _, want := range []string{"[--output-format][stream-json][--verbose]", "[--model][haiku]", "[--setting-sources][]",
+		"dir:/a/token/dir\n", "token:sk-ant-oat01-T\n"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("run lacks %q:\n%s", want, b)
+		}
+	}
+	// a directory no setup-token account has: the user's token stays out
+	if _, err := claudeAskLimits(context.Background(), "/a/saved/dir", ""); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(log); !strings.Contains(string(b), "token:\n") {
+		t.Fatalf("the user's own token went in:\n%s", b)
+	}
+}
+
+// Anthropic refusing the token is told in Claude Code's own words, which
+// provider.ClaudeTokenRefused knows.
+func TestClaudeAskLimitsRefused(t *testing.T) {
+	fakeStreamClaude(t, `{"type":"result","subtype":"success","is_error":true,"api_error_status":401,"result":"Failed to authenticate. API Error: 401 OAuth access token is invalid."}`)
+	_, err := claudeAskLimits(context.Background(), "/a/token/dir", "sk-ant-oat01-T")
+	if err == nil || !provider.ClaudeTokenRefused(err.Error()) {
+		t.Fatalf("got %v", err)
+	}
+	fakeStreamClaude(t, `{"type":"result","subtype":"success","is_error":false,"result":"OK"}`)
+	if _, err := claudeAskLimits(context.Background(), "/a/token/dir", "sk-ant-oat01-T"); err == nil {
+		t.Fatal("a run that told no allowance read as one")
 	}
 }

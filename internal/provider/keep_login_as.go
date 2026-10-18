@@ -129,7 +129,7 @@ func rankLogins(agent string, order []string) error {
 func signInToFirst(agent string) error {
 	for _, l := range Logins(agent) {
 		if (l.Active || l.On) && !l.Paused && l.Lapsed == "" {
-			if l.Active {
+			if l.Active || l.Token {
 				return nil
 			}
 			return SwitchLogin(agent, l.User)

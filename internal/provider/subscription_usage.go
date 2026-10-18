@@ -849,7 +849,7 @@ func claudeWindows(ctx context.Context, user string, active bool) ([]QuotaWindow
 
 var (
 	errClaudeNotAsked = errors.New("not read yet: magpie reads Claude's usage by running Claude Code's /usage")
-	errClaudeSaved    = errors.New("not read yet: refresh this account's card to have Claude Code's /usage read it")
+	errClaudeSaved    = errors.New("not read yet: refresh this account's card to have Claude Code read it")
 )
 
 // savedRefresh says ctx is the refresh of the card of the saved Claude

@@ -525,13 +525,26 @@ var claudeEnvVars = []string{"ENABLE_CLAUDEAI_MCP_SERVERS", "DISABLE_AUTO_COMPAC
 // env is env for a run in config directory configDir ("" for the account
 // Claude Code is signed in to): for one in WSL, what of it goes in.
 func (c claudeCLI) env(env []string, configDir string) []string {
-	env = inClaudeDir(env, configDir)
+	return c.envOn(env, configDir, "")
+}
+
+// envOn is env for a run in configDir on token, a setup-token not saved
+// yet; "" takes the saved account's, if any (inClaudeDir).
+func (c claudeCLI) envOn(env []string, configDir, token string) []string {
+	if token != "" {
+		env = withClaudeToken(env, configDir, token)
+	} else {
+		env = inClaudeDir(env, configDir)
+	}
 	if c.wsl == nil {
 		return env
 	}
 	names := claudeEnvVars
 	if configDir != "" {
 		names = append(slices.Clone(names), "CLAUDE_CONFIG_DIR/p")
+		if slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, "CLAUDE_CODE_OAUTH_TOKEN=") }) {
+			names = append(names, "CLAUDE_CODE_OAUTH_TOKEN")
+		}
 	}
 	if c.wsl.Root {
 		// asRoot's, for a distro whose user is root
@@ -1941,21 +1954,32 @@ func claudeCLIArgs(model, mcpConfig, effort string, web bool) []string {
 // inClaudeDir is env for a Claude Code run on a saved account in use beside
 // the one it is signed in to: in the account's config directory
 // (provider's claude_dirs.go), where Claude Code keeps the sign-in fresh
-// itself. configDir "" is the account Claude Code is signed in to, and env
-// is kept as it is.
+// itself, or, for an account added by its setup-token, with that token as
+// CLAUDE_CODE_OAUTH_TOKEN. configDir "" is the account Claude Code is
+// signed in to, and env is kept as it is.
 func inClaudeDir(env []string, configDir string) []string {
 	if configDir == "" {
 		return env
 	}
-	out := make([]string, 0, len(env)+1)
+	return withClaudeToken(env, configDir, provider.ClaudeDirToken(configDir))
+}
+
+// withClaudeToken is env for a run in configDir on token, a setup-token;
+// "" leaves Claude Code to the sign-in in configDir.
+func withClaudeToken(env []string, configDir, token string) []string {
+	out := make([]string, 0, len(env)+2)
 	for _, e := range env {
 		switch k, _, _ := strings.Cut(e, "="); k {
-		case "CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR":
+		case "CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN":
 			continue
 		}
 		out = append(out, e)
 	}
-	return append(out, "CLAUDE_CONFIG_DIR="+configDir)
+	out = append(out, "CLAUDE_CONFIG_DIR="+configDir)
+	if token != "" {
+		out = append(out, "CLAUDE_CODE_OAUTH_TOKEN="+token)
+	}
+	return out
 }
 
 func cleanClaudeEnv(env []string) []string {
@@ -2304,7 +2328,7 @@ func (r *subscriptionRun) readOutput(rd io.Reader) {
 				// it isn't run again on that one (provider/claude_auth.go) —
 				// not when Claude Code's own run went on as another account,
 				// which is read only for such an error
-				if user, own := ownerAccount(r.owner); user != "" && provider.ClaudeSignInRequired(text) &&
+				if user, own := ownerAccount(r.owner); user != "" && (provider.ClaudeSignInRequired(text) || provider.ClaudeTokenRefused(text)) &&
 					!(own && provider.ClaudeCodeMovedOff(user)) {
 					provider.NoteClaudeSignInFailure(user, r.loginVersion, text)
 				}
